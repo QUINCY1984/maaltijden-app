@@ -96,6 +96,7 @@ if uploaded_file is not None:
                                 align_kwargs['wrap_text'] = True
                             cell.alignment = Alignment(**align_kwargs)
                 
+                # Hoofdtotalen
                 max_row = ws.max_row + 1
                 ws.cell(row=max_row, column=1, value="TOTAAL").font = total_font
                 ws.cell(row=max_row, column=4, value=total_g).font = total_font
@@ -108,8 +109,33 @@ if uploaded_file is not None:
                     if c_idx not in [1, 4, 5]: cell.value = ""
                     cell.fill = total_fill
                     cell.border = thin_border
+                
+                # --- GROEPEN OVERZICHT ---
+                # Filter de subset op rijen waar 'groep' in de prijscode staat
+                df_groups = df_subset[df_subset['Prijscode'].astype(str).str.lower().str.contains('groep')]
+                if not df_groups.empty:
+                    ws.append([]) # Lege witregel voor de netheid
+                    summary_row = ws.max_row + 1
+                    ws.cell(row=summary_row, column=3, value="GROEPEN OVERZICHT:").font = Font(bold=True)
                     
-                # Kolom A (Kamer) is nu exact op 6.20 gezet
+                    # Bereken per boeker het aantal gasten en maaltijden
+                    group_summary = df_groups.groupby('Boeker', as_index=False)[['Total guests', 'Posted meals']].sum()
+                    
+                    for _, grp_row in group_summary.iterrows():
+                        r = ws.max_row + 1
+                        # Zet de boeker in kolom C
+                        ws.cell(row=r, column=3, value=grp_row['Boeker'])
+                        
+                        # Aantallen mooi in het midden onder Guests en Meals
+                        c4 = ws.cell(row=r, column=4, value=grp_row['Total guests'])
+                        c4.alignment = Alignment(horizontal='center', vertical='center')
+                        c4.font = Font(bold=True)
+                        
+                        c5 = ws.cell(row=r, column=5, value=grp_row['Posted meals'])
+                        c5.alignment = Alignment(horizontal='center', vertical='center')
+                        c5.font = Font(bold=True)
+                    
+                # Kolom A (Kamer) is exact op 6.20 gezet
                 widths = {'A': 6.20, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 32, 'G': 30, 'H': 7}
                 for col, w in widths.items():
                     ws.column_dimensions[col].width = w
