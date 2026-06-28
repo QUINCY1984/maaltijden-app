@@ -51,7 +51,7 @@ if uploaded_file is not None:
             df['Total guests'] = pd.to_numeric(df['Total guests'], errors='coerce').fillna(0).astype(int)
             df['Posted meals'] = pd.to_numeric(df['Posted meals'], errors='coerce').fillna(0).astype(int)
             
-            # Alle kamers onder de 6000, maar met uitsluiting van de ongeldige 5810
+            # Alle kamers onder de 6000, met uitsluiting van de ongeldige 5810
             df = df[(df['Kamer'] < 6000) & (df['Kamer'] != 5810)]
             
             display_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Guests', 'Meals', 'Notities (gast)', 'Prijscode', 'MP Code']
@@ -96,7 +96,7 @@ if uploaded_file is not None:
                                 align_kwargs['wrap_text'] = True
                             cell.alignment = Alignment(**align_kwargs)
                 
-                # Hoofdtotalen
+                # Hoofdtotalen onderaan het tabblad
                 max_row = ws.max_row + 1
                 ws.cell(row=max_row, column=1, value="TOTAAL").font = total_font
                 ws.cell(row=max_row, column=4, value=total_g).font = total_font
@@ -110,40 +110,83 @@ if uploaded_file is not None:
                     cell.fill = total_fill
                     cell.border = thin_border
                 
-                # --- GROEPEN OVERZICHT ---
-                # Filter de subset op rijen waar 'groep' in de prijscode staat
-                df_groups = df_subset[df_subset['Prijscode'].astype(str).str.lower().str.contains('groep')]
-                if not df_groups.empty:
-                    ws.append([]) # Lege witregel voor de netheid
-                    summary_row = ws.max_row + 1
-                    ws.cell(row=summary_row, column=3, value="GROEPEN OVERZICHT:").font = Font(bold=True)
-                    
-                    # Bereken per boeker het aantal gasten en maaltijden
-                    group_summary = df_groups.groupby('Boeker', as_index=False)[['Total guests', 'Posted meals']].sum()
-                    
-                    for _, grp_row in group_summary.iterrows():
-                        r = ws.max_row + 1
-                        # Zet de boeker in kolom C
-                        ws.cell(row=r, column=3, value=grp_row['Boeker'])
-                        
-                        # Aantallen mooi in het midden onder Guests en Meals
-                        c4 = ws.cell(row=r, column=4, value=grp_row['Total guests'])
-                        c4.alignment = Alignment(horizontal='center', vertical='center')
-                        c4.font = Font(bold=True)
-                        
-                        c5 = ws.cell(row=r, column=5, value=grp_row['Posted meals'])
-                        c5.alignment = Alignment(horizontal='center', vertical='center')
-                        c5.font = Font(bold=True)
-                    
-                # Kolom A (Kamer) is exact op 6.20 gezet
+                # Kolom A (Kamer) = 6.20
                 widths = {'A': 6.20, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 32, 'G': 30, 'H': 7}
                 for col, w in widths.items():
                     ws.column_dimensions[col].width = w
                 ws.column_dimensions['B'].hidden = True
 
-            format_sheet(wb.create_sheet(title="Blok 1000 + 3000"), df[((df['Kamer'] >= 1000) & (df['Kamer'] < 2000)) | ((df['Kamer'] >= 3000) & (df['Kamer'] < 4000))])
-            format_sheet(wb.create_sheet(title="Overige Kamers"), df[~(((df['Kamer'] >= 1000) & (df['Kamer'] < 2000)) | ((df['Kamer'] >= 3000) & (df['Kamer'] < 4000)))])
+            # Splits de data
+            df_1300 = df[((df['Kamer'] >= 1000) & (df['Kamer'] < 2000)) | ((df['Kamer'] >= 3000) & (df['Kamer'] < 4000))]
+            df_other = df[~(((df['Kamer'] >= 1000) & (df['Kamer'] < 2000)) | ((df['Kamer'] >= 3000) & (df['Kamer'] < 4000)))]
+
+            # Maak de eerste twee tabbladen
+            format_sheet(wb.create_sheet(title="Blok 1000 + 3000"), df_1300)
+            format_sheet(wb.create_sheet(title="Overige Kamers"), df_other)
             
+            # --- DERDE TABBLAD: GROEPEN OVERZICHT ---
+            ws_groepen = wb.create_sheet(title="Groepen Overzicht")
+            ws_groepen.page_setup.orientation = ws_groepen.ORIENTATION_LANDSCAPE
+            
+            def add_group_summary_to_sheet(ws, title, df_subset, start_row):
+                df_groups = df_subset[df_subset['Prijscode'].astype(str).str.lower().str.contains('groep')]
+                if df_groups.empty:
+                    ws.cell(row=start_row, column=1, value=f"{title} - GEEN GROEPEN").font = Font(bold=True, size=12)
+                    return start_row + 2
+                
+                # Titel voor de sectie
+                ws.cell(row=start_row, column=1, value=title).font = Font(bold=True, size=12)
+                
+                # Headers voor de tabel
+                headers = ["Boeker", "Guests", "Meals"]
+                for col_num, header_title in enumerate(headers, 1):
+                    cell = ws.cell(row=start_row+1, column=col_num, value=header_title)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.border = thin_border
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                
+                # Bereken aantallen per boeker
+                group_summary = df_groups.groupby('Boeker', as_index=False)[['Total guests', 'Posted meals']].sum()
+                
+                r = start_row + 2
+                for idx, grp_row in group_summary.iterrows():
+                    c1 = ws.cell(row=r, column=1, value=grp_row['Boeker'])
+                    c2 = ws.cell(row=r, column=2, value=grp_row['Total guests'])
+                    c3 = ws.cell(row=r, column=3, value=grp_row['Posted meals'])
+                    
+                    fill_color = zebra_fill_1 if idx % 2 == 0 else zebra_fill_2
+                    for cell in [c1, c2, c3]:
+                        cell.border = thin_border
+                        cell.fill = fill_color
+                        if cell.column > 1:
+                            cell.alignment = Alignment(horizontal='center', vertical='center')
+                    r += 1
+                
+                # Subtotaal voor deze sectie
+                c1_tot = ws.cell(row=r, column=1, value="TOTAAL")
+                c2_tot = ws.cell(row=r, column=2, value=group_summary['Total guests'].sum())
+                c3_tot = ws.cell(row=r, column=3, value=group_summary['Posted meals'].sum())
+                
+                for cell in [c1_tot, c2_tot, c3_tot]:
+                    cell.font = total_font
+                    cell.fill = total_fill
+                    cell.border = thin_border
+                    if cell.column > 1:
+                        cell.alignment = Alignment(horizontal='center', vertical='center')
+                
+                return r + 3 # Geef de startrij voor de volgende sectie (met wat witruimte)
+
+            # Voeg de twee secties toe aan het overzichtsblad
+            next_row = 1
+            next_row = add_group_summary_to_sheet(ws_groepen, "GROEPEN: BLOK 1000 + 3000", df_1300, next_row)
+            add_group_summary_to_sheet(ws_groepen, "GROEPEN: OVERIGE KAMERS", df_other, next_row)
+            
+            # Kolombreedtes voor het derde tabblad
+            ws_groepen.column_dimensions['A'].width = 40
+            ws_groepen.column_dimensions['B'].width = 12
+            ws_groepen.column_dimensions['C'].width = 12
+
             # Sla het Excel-bestand virtueel op zodat het gedownload kan worden
             output = io.BytesIO()
             wb.save(output)
