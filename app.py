@@ -51,7 +51,7 @@ if uploaded_file is not None:
             df['Total guests'] = pd.to_numeric(df['Total guests'], errors='coerce').fillna(0).astype(int)
             df['Posted meals'] = pd.to_numeric(df['Posted meals'], errors='coerce').fillna(0).astype(int)
             
-            # Kamer grens verhoogd naar 6000 voor de 5900-kamers, met uitsluiting van de foute 5810
+            # Alle kamers onder de 6000, maar met uitsluiting van de ongeldige 5810
             df = df[(df['Kamer'] < 6000) & (df['Kamer'] != 5810)]
             
             display_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Guests', 'Meals', 'Notities (gast)', 'Prijscode', 'MP Code']
@@ -109,7 +109,8 @@ if uploaded_file is not None:
                     cell.fill = total_fill
                     cell.border = thin_border
                     
-                widths = {'A': 5, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 32, 'G': 30, 'H': 7}
+                # Kolom A (Kamer) is nu exact op 6.20 gezet
+                widths = {'A': 6.20, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 32, 'G': 30, 'H': 7}
                 for col, w in widths.items():
                     ws.column_dimensions[col].width = w
                 ws.column_dimensions['B'].hidden = True
