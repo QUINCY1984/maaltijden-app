@@ -110,7 +110,7 @@ if uploaded_file is not None:
                     cell.fill = total_fill
                     cell.border = thin_border
                 
-                # Kolom A (Kamer) = 6.20
+                # Aangepaste kolombreedtes (Kolom H is hier nu nadrukkelijk op 7 gezet)
                 widths = {'A': 6.20, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 32, 'G': 30, 'H': 7}
                 for col, w in widths.items():
                     ws.column_dimensions[col].width = w
