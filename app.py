@@ -69,7 +69,20 @@ if uploaded_file is not None:
             thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
             
             def format_sheet(ws, df_subset):
+                # Pagina-instellingen voor perfecte A4 landschapsafdruk met smalle marges
                 ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+                ws.page_setup.paperSize = ws.PAPERSIZE_A4
+                ws.sheet_properties.pageSetUpPr.fitToPage = True
+                ws.page_setup.fitToWidth = 1
+                ws.page_setup.fitToHeight = 0 # Hoogte is vrij, breedte wordt geforceerd op 1 pagina
+                
+                ws.page_margins.left = 0.25
+                ws.page_margins.right = 0.25
+                ws.page_margins.top = 0.75
+                ws.page_margins.bottom = 0.75
+                ws.page_margins.header = 0.3
+                ws.page_margins.footer = 0.3
+
                 df_subset = df_subset.sort_values(by='Kamer')
                 total_g = df_subset['Total guests'].sum()
                 total_m = df_subset['Posted meals'].sum()
@@ -110,8 +123,8 @@ if uploaded_file is not None:
                     cell.fill = total_fill
                     cell.border = thin_border
                 
-                # Aangepaste kolombreedtes (Kolom H is hier nu nadrukkelijk op 7 gezet)
-                widths = {'A': 6.20, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 32, 'G': 30, 'H': 7}
+                # Kolombreedtes (Kolom F flink verbreed naar 55 voor de notities)
+                widths = {'A': 6.20, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 55, 'G': 30, 'H': 7}
                 for col, w in widths.items():
                     ws.column_dimensions[col].width = w
                 ws.column_dimensions['B'].hidden = True
@@ -127,6 +140,16 @@ if uploaded_file is not None:
             # --- DERDE TABBLAD: GROEPEN OVERZICHT ---
             ws_groepen = wb.create_sheet(title="Groepen Overzicht")
             ws_groepen.page_setup.orientation = ws_groepen.ORIENTATION_LANDSCAPE
+            ws_groepen.page_setup.paperSize = ws_groepen.PAPERSIZE_A4
+            ws_groepen.sheet_properties.pageSetUpPr.fitToPage = True
+            ws_groepen.page_setup.fitToWidth = 1
+            ws_groepen.page_setup.fitToHeight = 0
+            ws_groepen.page_margins.left = 0.25
+            ws_groepen.page_margins.right = 0.25
+            ws_groepen.page_margins.top = 0.75
+            ws_groepen.page_margins.bottom = 0.75
+            ws_groepen.page_margins.header = 0.3
+            ws_groepen.page_margins.footer = 0.3
             
             def add_group_summary_to_sheet(ws, title, df_subset, start_row):
                 df_groups = df_subset[df_subset['Prijscode'].astype(str).str.lower().str.contains('groep')]
@@ -134,10 +157,8 @@ if uploaded_file is not None:
                     ws.cell(row=start_row, column=1, value=f"{title} - GEEN GROEPEN").font = Font(bold=True, size=12)
                     return start_row + 2
                 
-                # Titel voor de sectie
                 ws.cell(row=start_row, column=1, value=title).font = Font(bold=True, size=12)
                 
-                # Headers voor de tabel
                 headers = ["Boeker", "Guests", "Meals"]
                 for col_num, header_title in enumerate(headers, 1):
                     cell = ws.cell(row=start_row+1, column=col_num, value=header_title)
@@ -146,7 +167,6 @@ if uploaded_file is not None:
                     cell.border = thin_border
                     cell.alignment = Alignment(horizontal='center', vertical='center')
                 
-                # Bereken aantallen per boeker
                 group_summary = df_groups.groupby('Boeker', as_index=False)[['Total guests', 'Posted meals']].sum()
                 
                 r = start_row + 2
@@ -163,7 +183,6 @@ if uploaded_file is not None:
                             cell.alignment = Alignment(horizontal='center', vertical='center')
                     r += 1
                 
-                # Subtotaal voor deze sectie
                 c1_tot = ws.cell(row=r, column=1, value="TOTAAL")
                 c2_tot = ws.cell(row=r, column=2, value=group_summary['Total guests'].sum())
                 c3_tot = ws.cell(row=r, column=3, value=group_summary['Posted meals'].sum())
@@ -175,26 +194,22 @@ if uploaded_file is not None:
                     if cell.column > 1:
                         cell.alignment = Alignment(horizontal='center', vertical='center')
                 
-                return r + 3 # Geef de startrij voor de volgende sectie (met wat witruimte)
+                return r + 3
 
-            # Voeg de twee secties toe aan het overzichtsblad
             next_row = 1
             next_row = add_group_summary_to_sheet(ws_groepen, "GROEPEN: BLOK 1000 + 3000", df_1300, next_row)
             add_group_summary_to_sheet(ws_groepen, "GROEPEN: OVERIGE KAMERS", df_other, next_row)
             
-            # Kolombreedtes voor het derde tabblad
             ws_groepen.column_dimensions['A'].width = 40
             ws_groepen.column_dimensions['B'].width = 12
             ws_groepen.column_dimensions['C'].width = 12
 
-            # Sla het Excel-bestand virtueel op zodat het gedownload kan worden
             output = io.BytesIO()
             wb.save(output)
             output.seek(0)
             
             st.success("Bestand is succesvol verwerkt!")
             
-            # Download knop
             st.download_button(
                 label="📥 Download Verwerkt Bestand",
                 data=output,
