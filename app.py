@@ -123,8 +123,8 @@ if uploaded_file is not None:
                     cell.fill = total_fill
                     cell.border = thin_border
                 
-                # Kolombreedtes (Kolom F flink verbreed naar 55 voor de notities)
-                widths = {'A': 6.20, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 55, 'G': 30, 'H': 7}
+                # Kolombreedtes (Kolom F exact op 51.57 gezet voor de notities)
+                widths = {'A': 6.20, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 51.57, 'G': 30, 'H': 7}
                 for col, w in widths.items():
                     ws.column_dimensions[col].width = w
                 ws.column_dimensions['B'].hidden = True
