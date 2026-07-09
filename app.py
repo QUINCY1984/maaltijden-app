@@ -4,6 +4,7 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import io
+import re
 
 st.set_page_config(page_title="Maaltijden Converter", layout="centered")
 st.title("🍽️ Maaltijden Converter")
@@ -14,7 +15,20 @@ uploaded_file = st.file_uploader("Kies het ruwe Excel-bestand", type=['xlsx', 'x
 if uploaded_file is not None:
     if st.button("Verwerk Bestand"):
         try:
-            # Lees de ruwe data direct uit de upload
+            # --- 1. DATUM UIT BESTANDSNAAM HALEN ---
+            file_date = ""
+            # Zoek naar een datum in het formaat YYYY-MM-DD
+            date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', uploaded_file.name)
+            if date_match:
+                # Zet om naar DD-MM-YYYY voor een mooiere weergave
+                file_date = f"{date_match.group(3)}-{date_match.group(2)}-{date_match.group(1)}"
+            else:
+                # Fallback: probeer DD-MM-YYYY te vinden
+                date_match_2 = re.search(r'(\d{2})-(\d{2})-(\d{4})', uploaded_file.name)
+                if date_match_2:
+                    file_date = date_match_2.group(0)
+
+            # --- 2. RUWE DATA INLEZEN ---
             df_raw = pd.read_excel(uploaded_file, sheet_name=0, header=None)
             
             mask = df_raw.apply(lambda row: row.astype(str).str.strip().eq('Kamer').any(), axis=1)
@@ -59,6 +73,7 @@ if uploaded_file is not None:
             wb = Workbook()
             wb.remove(wb.active)
             
+            # Stijlen instellen
             header_font = Font(bold=True, color="FFFFFF")
             header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
             zebra_fill_1 = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
@@ -68,13 +83,13 @@ if uploaded_file is not None:
             total_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
             thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
             
-            def format_sheet(ws, df_subset):
+            def format_sheet(ws, df_subset, is_first_sheet=False):
                 # Pagina-instellingen voor perfecte A4 landschapsafdruk met smalle marges
                 ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
                 ws.page_setup.paperSize = ws.PAPERSIZE_A4
                 ws.sheet_properties.pageSetUpPr.fitToPage = True
                 ws.page_setup.fitToWidth = 1
-                ws.page_setup.fitToHeight = 0 # Hoogte is vrij, breedte wordt geforceerd op 1 pagina
+                ws.page_setup.fitToHeight = 0 
                 
                 ws.page_margins.left = 0.25
                 ws.page_margins.right = 0.25
@@ -82,6 +97,23 @@ if uploaded_file is not None:
                 ws.page_margins.bottom = 0.75
                 ws.page_margins.header = 0.3
                 ws.page_margins.footer = 0.3
+
+                # --- TITEL EN DATUM VOOR HET EERSTE BLAD ---
+                if is_first_sheet:
+                    # Titel "Maaltijdlijsten" (Gecentreerd, Vet, Schuin, Onderstreept, Grootte 20)
+                    ws.merge_cells('A1:F1')
+                    title_cell = ws.cell(row=1, column=1, value="Maaltijdlijsten")
+                    title_cell.font = Font(bold=True, italic=True, underline="single", size=20)
+                    title_cell.alignment = Alignment(horizontal='center', vertical='center')
+                    
+                    # Datum in de rechterbovenhoek (Grootte 12)
+                    ws.merge_cells('G1:H1')
+                    date_cell = ws.cell(row=1, column=7, value=file_date)
+                    date_cell.font = Font(size=12)
+                    date_cell.alignment = Alignment(horizontal='right', vertical='center')
+                    
+                    ws.row_dimensions[1].height = 30
+                    ws.append([]) # Lege rij voor wat ademruimte onder de titel
 
                 df_subset = df_subset.sort_values(by='Kamer')
                 total_g = df_subset['Total guests'].sum()
@@ -92,9 +124,12 @@ if uploaded_file is not None:
                 rows = dataframe_to_rows(df_display, index=False, header=True)
                 for r_idx, row in enumerate(rows, 1):
                     ws.append(row)
+                    excel_row = ws.max_row # Gebruik de werkelijke Excel-rij (belangrijk vanwege de toegevoegde titel)
+                    
                     is_group = (r_idx > 1 and "groep" in str(row[6]).lower())
                     current_fill = header_fill if r_idx == 1 else (pink_fill if is_group else (zebra_fill_1 if r_idx % 2 == 0 else zebra_fill_2))
-                    for c_idx, cell in enumerate(ws[r_idx], 1):
+                    
+                    for c_idx, cell in enumerate(ws[excel_row], 1):
                         cell.border = thin_border
                         cell.fill = current_fill
                         if r_idx == 1:
@@ -123,7 +158,7 @@ if uploaded_file is not None:
                     cell.fill = total_fill
                     cell.border = thin_border
                 
-                # Kolombreedtes (Kolom F exact op 51.57 gezet voor de notities)
+                # Kolombreedtes (Notities = 51.57)
                 widths = {'A': 6.20, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 51.57, 'G': 30, 'H': 7}
                 for col, w in widths.items():
                     ws.column_dimensions[col].width = w
@@ -133,9 +168,9 @@ if uploaded_file is not None:
             df_1300 = df[((df['Kamer'] >= 1000) & (df['Kamer'] < 2000)) | ((df['Kamer'] >= 3000) & (df['Kamer'] < 4000))]
             df_other = df[~(((df['Kamer'] >= 1000) & (df['Kamer'] < 2000)) | ((df['Kamer'] >= 3000) & (df['Kamer'] < 4000)))]
 
-            # Maak de eerste twee tabbladen
-            format_sheet(wb.create_sheet(title="Blok 1000 + 3000"), df_1300)
-            format_sheet(wb.create_sheet(title="Overige Kamers"), df_other)
+            # Maak de tabbladen (geef is_first_sheet=True mee voor het eerste tabblad)
+            format_sheet(wb.create_sheet(title="Blok 1000 + 3000"), df_1300, is_first_sheet=True)
+            format_sheet(wb.create_sheet(title="Overige Kamers"), df_other, is_first_sheet=False)
             
             # --- DERDE TABBLAD: GROEPEN OVERZICHT ---
             ws_groepen = wb.create_sheet(title="Groepen Overzicht")
