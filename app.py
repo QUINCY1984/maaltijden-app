@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import io
 import re
 
 st.set_page_config(page_title="Maaltijden Converter", layout="centered")
-st.title("🍽️ Maaltijden Converter")
-st.write("Upload het ruwe Excel-bestand uit het systeem en bekijk de live statistieken voordat je downloadt.")
+st.title("🍽️ Flexibele Maaltijden Converter")
+st.write("Upload het ruwe Excel-bestand en kies zelf welke maaltijden je op je lijsten wilt combineren.")
 
 uploaded_file = st.file_uploader("Kies het ruwe Excel-bestand", type=['xlsx', 'xls'])
 
@@ -59,34 +60,67 @@ if uploaded_file is not None:
         df = df.dropna(subset=['Kamer'])
         df['Kamer'] = df['Kamer'].astype(int)
         df['Total guests'] = pd.to_numeric(df['Total guests'], errors='coerce').fillna(0).astype(int)
-        df['Posted meals'] = pd.to_numeric(df['Posted meals'], errors='coerce').fillna(0).astype(int)
         
-        # Alle kamers onder de 6000, met uitsluiting van de ongeldige 5810
         df = df[(df['Kamer'] < 6000) & (df['Kamer'] != 5810)]
         
-        # --- 3. MAALTIJD FILTER & DASHBOARD OP DE WEBSITE ---
-        unique_meals = df['MP Code'].dropna().astype(str).unique().tolist()
-        if not unique_meals:
-            unique_meals = ["Onbekend"]
+        for col in ['Gast(en)', 'Boeker', 'Notities (gast)', 'Prijscode']:
+            df[col] = df[col].fillna('')
             
+        df['MP_Standaard'] = df['MP Code'].astype(str).str.lower().replace({
+            'ontbijt': 'Ontbijt', 'breakfast': 'Ontbijt',
+            'lunch': 'Lunch',
+            'diner': 'Diner', 'dinner': 'Diner'
+        })
+        
+        # --- 3. DYNAMISCHE KEUZE VAN MAALTIJDEN ---
         st.markdown("---")
-        selected_meal = st.selectbox("📌 Welke maaltijd wil je verwerken?", unique_meals)
+        beschikbare_maaltijden = ['Ontbijt', 'Lunch', 'Diner']
+        selected_meals = st.multiselect(
+            "📌 Welke maaltijden wil je op deze lijst combineren?",
+            beschikbare_maaltijden,
+            default=beschikbare_maaltijden # Standaard zijn ze alle drie geselecteerd
+        )
         
-        df_filtered = df[df['MP Code'] == selected_meal]
+        if not selected_meals:
+            st.warning("Kies minstens één maaltijd om verder te gaan.")
+            st.stop()
+            
+        df = df[df['MP_Standaard'].isin(selected_meals)]
         
-        df_1300 = df_filtered[((df_filtered['Kamer'] >= 1000) & (df_filtered['Kamer'] < 2000)) | ((df_filtered['Kamer'] >= 3000) & (df_filtered['Kamer'] < 4000))]
-        df_other = df_filtered[~(((df_filtered['Kamer'] >= 1000) & (df_filtered['Kamer'] < 2000)) | ((df_filtered['Kamer'] >= 3000) & (df_filtered['Kamer'] < 4000)))]
+        if df.empty:
+            st.error("Er is geen data gevonden voor de geselecteerde maaltijd(en).")
+            st.stop()
+
+        # Groepeer de data!
+        df_pivot = pd.pivot_table(
+            df,
+            index=['Kamer', 'Gast(en)', 'Boeker', 'Notities (gast)', 'Prijscode'],
+            columns='MP_Standaard',
+            values='Total guests', 
+            aggfunc='sum',
+            fill_value=0
+        ).reset_index()
         
-        # Live dashboard op het scherm
-        st.markdown("### 📊 Live Overzicht (Gasten)")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Totaal in huis", df_filtered['Total guests'].sum())
-        col2.metric("🏨 Het buffet", df_1300['Total guests'].sum())
-        col3.metric("🌅 plad'O", df_other['Total guests'].sum())
+        for meal in selected_meals:
+            if meal not in df_pivot.columns:
+                df_pivot[meal] = 0
+                
+        df_1300 = df_pivot[((df_pivot['Kamer'] >= 1000) & (df_pivot['Kamer'] < 2000)) | ((df_pivot['Kamer'] >= 3000) & (df_pivot['Kamer'] < 4000))]
+        df_other = df_pivot[~(((df_pivot['Kamer'] >= 1000) & (df_pivot['Kamer'] < 2000)) | ((df_pivot['Kamer'] >= 3000) & (df_pivot['Kamer'] < 4000)))]
+        
+        st.markdown("### 📊 Live Overzicht (Totaal Gasten)")
+        cols = st.columns(len(selected_meals))
+        for i, meal in enumerate(selected_meals):
+            cols[i].metric(f"🍽️ {meal}", df_pivot[meal].sum())
         st.markdown("---")
 
-        # --- 4. EXCEL GENEREREN ---
-        display_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Guests', 'Meals', 'Notities (gast)', 'Prijscode', 'MP Code']
+        # --- 4. DYNAMISCHE EXCEL GENEREREN ---
+        display_cols = ['Kamer', 'Gast(en)', 'Boeker'] + selected_meals + ['Notities (gast)', 'Prijscode']
+        
+        # Bepaal dynamisch de kolom indexen (1-based voor Excel)
+        meal_indices = list(range(4, 4 + len(selected_meals)))
+        notities_idx = 4 + len(selected_meals)
+        prijscode_idx = notities_idx + 1
         
         wb = Workbook()
         wb.remove(wb.active)
@@ -96,15 +130,14 @@ if uploaded_file is not None:
         zebra_fill_1 = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
         zebra_fill_2 = PatternFill(start_color="E9EDF4", end_color="E9EDF4", fill_type="solid")
         pink_fill = PatternFill(start_color="FFD2D2", end_color="FFD2D2", fill_type="solid")
-        allergy_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid") # Fel geel voor diëten
+        allergy_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid") 
         total_font = Font(bold=True)
         total_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
         
-        # Slimme zoekwoorden voor de keuken/bediening
         allergy_keywords = ['allerg', 'gluten', 'lactose', 'vegan', 'vege', 'dieet', 'intoleran', 'halal', 'noten', 'pinda', 'zonder', 'vrij']
 
-        def format_sheet(ws, df_subset):
+        def format_sheet(ws, df_subset, is_first_sheet=False):
             ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
             ws.page_setup.paperSize = ws.PAPERSIZE_A4
             ws.sheet_properties.pageSetUpPr.fitToPage = True
@@ -118,14 +151,15 @@ if uploaded_file is not None:
             ws.page_margins.header = 0.3
             ws.page_margins.footer = 0.3
 
-            ws.merge_cells('A1:F1')
-            # Titel automatisch aangepast aan het type maaltijd
-            title_cell = ws.cell(row=1, column=1, value=f"Maaltijdlijsten - {selected_meal.upper()}")
+            # --- DYNAMISCHE TITEL EN DATUM ---
+            ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=prijscode_idx - 2)
+            titel_tekst = f"Maaltijdlijsten - {', '.join(selected_meals).upper()}"
+            title_cell = ws.cell(row=1, column=1, value=titel_tekst)
             title_cell.font = Font(bold=True, italic=True, underline="single", size=20)
             title_cell.alignment = Alignment(horizontal='center', vertical='center')
             
-            ws.merge_cells('G1:H1')
-            date_cell = ws.cell(row=1, column=7, value=file_date)
+            ws.merge_cells(start_row=1, start_column=prijscode_idx - 1, end_row=1, end_column=prijscode_idx)
+            date_cell = ws.cell(row=1, column=prijscode_idx - 1, value=file_date)
             date_cell.font = Font(size=12)
             date_cell.alignment = Alignment(horizontal='right', vertical='center')
             
@@ -133,17 +167,14 @@ if uploaded_file is not None:
             ws.append([]) # Lege rij
 
             df_subset = df_subset.sort_values(by='Kamer')
-            total_g = df_subset['Total guests'].sum()
-            total_m = df_subset['Posted meals'].sum()
-            df_display = df_subset.copy()
-            df_display.columns = display_cols
+            df_display = df_subset[display_cols].copy()
             
             rows = dataframe_to_rows(df_display, index=False, header=True)
             for r_idx, row in enumerate(rows, 1):
                 ws.append(row)
                 excel_row = ws.max_row
                 
-                is_group = (r_idx > 1 and "groep" in str(row[6]).lower())
+                is_group = (r_idx > 1 and "groep" in str(row[prijscode_idx - 1]).lower())
                 current_fill = header_fill if r_idx == 1 else (pink_fill if is_group else (zebra_fill_1 if r_idx % 2 == 0 else zebra_fill_2))
                 
                 for c_idx, cell in enumerate(ws[excel_row], 1):
@@ -156,38 +187,47 @@ if uploaded_file is not None:
                     else:
                         align_kwargs = {'vertical': 'center'}
                         if c_idx == 1: align_kwargs['horizontal'] = 'left'
-                        elif c_idx in [4, 5]: align_kwargs['horizontal'] = 'center'
-                        elif c_idx == 6: 
+                        elif c_idx in meal_indices: align_kwargs['horizontal'] = 'center'
+                        elif c_idx == notities_idx: 
                             align_kwargs['horizontal'] = 'center'
                             align_kwargs['wrap_text'] = True
                         cell.alignment = Alignment(**align_kwargs)
 
-                        # Check op dieetwensen in kolom 'Notities (gast)'
-                        if c_idx == 6 and pd.notna(row[5]):
-                            notitie_tekst = str(row[5]).lower()
+                        # Check op dieetwensen
+                        if c_idx == notities_idx and pd.notna(row[notities_idx - 1]):
+                            notitie_tekst = str(row[notities_idx - 1]).lower()
                             if any(keyword in notitie_tekst for keyword in allergy_keywords):
                                 cell.fill = allergy_fill
-                                cell.font = Font(bold=True) # Maak tekst vetgedrukt voor extra attentie
+                                cell.font = Font(bold=True)
             
+            # Totaalrij onderaan
             max_row = ws.max_row + 1
             ws.cell(row=max_row, column=1, value="TOTAAL").font = total_font
-            ws.cell(row=max_row, column=4, value=total_g).font = total_font
-            ws.cell(row=max_row, column=5, value=total_m).font = total_font
-            ws.cell(row=max_row, column=4).alignment = Alignment(horizontal='center', vertical='center')
-            ws.cell(row=max_row, column=5).alignment = Alignment(horizontal='center', vertical='center')
             
-            for c_idx in range(1, 9):
+            for m_idx in meal_indices:
+                meal_name = selected_meals[m_idx - 4]
+                meal_tot = df_subset[meal_name].sum()
+                ws.cell(row=max_row, column=m_idx, value=meal_tot).font = total_font
+                ws.cell(row=max_row, column=m_idx).alignment = Alignment(horizontal='center', vertical='center')
+            
+            for c_idx in range(1, prijscode_idx + 1):
                 cell = ws.cell(row=max_row, column=c_idx)
-                if c_idx not in [1, 4, 5]: cell.value = ""
+                if c_idx not in [1] + meal_indices: cell.value = ""
                 cell.fill = total_fill
                 cell.border = thin_border
             
-            widths = {'A': 6.20, 'B': 30, 'C': 30, 'D': 7, 'E': 7, 'F': 51.57, 'G': 30, 'H': 7}
-            for col, w in widths.items():
-                ws.column_dimensions[col].width = w
+            # Kolombreedtes dynamisch toewijzen
+            col_widths = {1: 6.20, 2: 30, 3: 30}
+            for m_idx in meal_indices:
+                col_widths[m_idx] = 7
+            col_widths[notities_idx] = 51.57
+            col_widths[prijscode_idx] = 30
+            
+            for col_idx, w in col_widths.items():
+                ws.column_dimensions[get_column_letter(col_idx)].width = w
             ws.column_dimensions['B'].hidden = True
 
-        format_sheet(wb.create_sheet(title="Het buffet"), df_1300)
+        format_sheet(wb.create_sheet(title="Het buffet"), df_1300, is_first_sheet=True)
         format_sheet(wb.create_sheet(title="plad'O"), df_other)
         
         # --- DERDE TABBLAD: GROEPEN OVERZICHT ---
@@ -212,7 +252,7 @@ if uploaded_file is not None:
             
             ws.cell(row=start_row, column=1, value=title).font = Font(bold=True, size=12)
             
-            headers = ["Boeker", "Guests", "Meals"]
+            headers = ["Boeker"] + selected_meals
             for col_num, header_title in enumerate(headers, 1):
                 cell = ws.cell(row=start_row+1, column=col_num, value=header_title)
                 cell.font = header_font
@@ -220,52 +260,50 @@ if uploaded_file is not None:
                 cell.border = thin_border
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             
-            group_summary = df_groups.groupby('Boeker', as_index=False)[['Total guests', 'Posted meals']].sum()
+            group_summary = df_groups.groupby('Boeker', as_index=False)[selected_meals].sum()
             
             r = start_row + 2
             for idx, grp_row in group_summary.iterrows():
-                c1 = ws.cell(row=r, column=1, value=grp_row['Boeker'])
-                c2 = ws.cell(row=r, column=2, value=grp_row['Total guests'])
-                c3 = ws.cell(row=r, column=3, value=grp_row['Posted meals'])
+                ws.cell(row=r, column=1, value=grp_row['Boeker']).border = thin_border
+                ws.cell(row=r, column=1).fill = zebra_fill_1 if idx % 2 == 0 else zebra_fill_2
                 
-                fill_color = zebra_fill_1 if idx % 2 == 0 else zebra_fill_2
-                for cell in [c1, c2, c3]:
-                    cell.border = thin_border
-                    cell.fill = fill_color
-                    if cell.column > 1:
-                        cell.alignment = Alignment(horizontal='center', vertical='center')
+                for m_idx, meal in enumerate(selected_meals, 2):
+                    c = ws.cell(row=r, column=m_idx, value=grp_row[meal])
+                    c.border = thin_border
+                    c.fill = zebra_fill_1 if idx % 2 == 0 else zebra_fill_2
+                    c.alignment = Alignment(horizontal='center', vertical='center')
                 r += 1
             
-            c1_tot = ws.cell(row=r, column=1, value="TOTAAL")
-            c2_tot = ws.cell(row=r, column=2, value=group_summary['Total guests'].sum())
-            c3_tot = ws.cell(row=r, column=3, value=group_summary['Posted meals'].sum())
+            ws.cell(row=r, column=1, value="TOTAAL").font = total_font
+            ws.cell(row=r, column=1).fill = total_fill
+            ws.cell(row=r, column=1).border = thin_border
             
-            for cell in [c1_tot, c2_tot, c3_tot]:
-                cell.font = total_font
-                cell.fill = total_fill
-                cell.border = thin_border
-                if cell.column > 1:
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
+            for m_idx, meal in enumerate(selected_meals, 2):
+                c = ws.cell(row=r, column=m_idx, value=group_summary[meal].sum())
+                c.font = total_font
+                c.fill = total_fill
+                c.border = thin_border
+                c.alignment = Alignment(horizontal='center', vertical='center')
             
             return r + 3
 
         next_row = 1
-        next_row = add_group_summary_to_sheet(ws_groepen, f"GROEPEN: HET BUFFET ({selected_meal.upper()})", df_1300, next_row)
-        add_group_summary_to_sheet(ws_groepen, f"GROEPEN: PLAD'O ({selected_meal.upper()})", df_other, next_row)
+        titel_toevoeging = " + ".join(selected_meals).upper()
+        next_row = add_group_summary_to_sheet(ws_groepen, f"GROEPEN: HET BUFFET ({titel_toevoeging})", df_1300, next_row)
+        add_group_summary_to_sheet(ws_groepen, f"GROEPEN: PLAD'O ({titel_toevoeging})", df_other, next_row)
         
         ws_groepen.column_dimensions['A'].width = 40
-        ws_groepen.column_dimensions['B'].width = 12
-        ws_groepen.column_dimensions['C'].width = 12
+        for i in range(len(selected_meals)):
+            ws_groepen.column_dimensions[get_column_letter(2 + i)].width = 12
 
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
         
-        # Grote, duidelijke downloadknop
         st.download_button(
-            label=f"📥 DOWNLOAD: {selected_meal.upper()} LIJSTEN",
+            label="📥 DOWNLOAD LIJSTEN",
             data=output,
-            file_name=f"Processed_{selected_meal}_{uploaded_file.name}",
+            file_name=f"Lijsten_{uploaded_file.name}",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
