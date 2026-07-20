@@ -78,7 +78,7 @@ if uploaded_file is not None:
         selected_meals = st.multiselect(
             "📌 Welke maaltijden wil je op deze lijst combineren?",
             beschikbare_maaltijden,
-            default=beschikbare_maaltijden # Standaard zijn ze alle drie geselecteerd
+            default=beschikbare_maaltijden
         )
         
         if not selected_meals:
@@ -91,7 +91,6 @@ if uploaded_file is not None:
             st.error("Er is geen data gevonden voor de geselecteerde maaltijd(en).")
             st.stop()
 
-        # Groepeer de data!
         df_pivot = pd.pivot_table(
             df,
             index=['Kamer', 'Gast(en)', 'Boeker', 'Notities (gast)', 'Prijscode'],
@@ -117,7 +116,6 @@ if uploaded_file is not None:
         # --- 4. DYNAMISCHE EXCEL GENEREREN ---
         display_cols = ['Kamer', 'Gast(en)', 'Boeker'] + selected_meals + ['Notities (gast)', 'Prijscode']
         
-        # Bepaal dynamisch de kolom indexen (1-based voor Excel)
         meal_indices = list(range(4, 4 + len(selected_meals)))
         notities_idx = 4 + len(selected_meals)
         prijscode_idx = notities_idx + 1
@@ -151,19 +149,20 @@ if uploaded_file is not None:
             ws.page_margins.header = 0.3
             ws.page_margins.footer = 0.3
 
-            # --- DYNAMISCHE TITEL EN DATUM ---
-            ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=prijscode_idx - 2)
+            # --- DYNAMISCHE TITEL EN DATUM (PERFECT GECENTREERD) ---
+            # Merge kolom A helemaal tot en met de brede Notities kolom
+            ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=notities_idx)
             titel_tekst = f"Maaltijdlijsten - {', '.join(selected_meals).upper()}"
             title_cell = ws.cell(row=1, column=1, value=titel_tekst)
             title_cell.font = Font(bold=True, italic=True, underline="single", size=20)
             title_cell.alignment = Alignment(horizontal='center', vertical='center')
             
-            ws.merge_cells(start_row=1, start_column=prijscode_idx - 1, end_row=1, end_column=prijscode_idx)
-            date_cell = ws.cell(row=1, column=prijscode_idx - 1, value=file_date)
+            # Datum helemaal strak in de rechter Prijscode kolom
+            date_cell = ws.cell(row=1, column=prijscode_idx, value=file_date)
             date_cell.font = Font(size=12)
             date_cell.alignment = Alignment(horizontal='right', vertical='center')
             
-            ws.row_dimensions[1].height = 30
+            ws.row_dimensions[1].height = 35 # Iets meer hoogte gegeven voor de grote tekst
             ws.append([]) # Lege rij
 
             df_subset = df_subset.sort_values(by='Kamer')
@@ -193,14 +192,12 @@ if uploaded_file is not None:
                             align_kwargs['wrap_text'] = True
                         cell.alignment = Alignment(**align_kwargs)
 
-                        # Check op dieetwensen
                         if c_idx == notities_idx and pd.notna(row[notities_idx - 1]):
                             notitie_tekst = str(row[notities_idx - 1]).lower()
                             if any(keyword in notitie_tekst for keyword in allergy_keywords):
                                 cell.fill = allergy_fill
                                 cell.font = Font(bold=True)
             
-            # Totaalrij onderaan
             max_row = ws.max_row + 1
             ws.cell(row=max_row, column=1, value="TOTAAL").font = total_font
             
@@ -216,7 +213,6 @@ if uploaded_file is not None:
                 cell.fill = total_fill
                 cell.border = thin_border
             
-            # Kolombreedtes dynamisch toewijzen
             col_widths = {1: 6.20, 2: 30, 3: 30}
             for m_idx in meal_indices:
                 col_widths[m_idx] = 7
