@@ -36,7 +36,8 @@ if uploaded_file is not None:
         header_row_idx = mask.idxmax()
         header_row = df_raw.iloc[header_row_idx].fillna('').astype(str).str.strip()
         
-        expected_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Total guests', 'Posted meals', 'Notities (gast)', 'Prijscode', 'MP Code']
+        # Nieuwe kolommen 'Kind 0 - 3' en 'Kind 4 - 11' toegevoegd in de verwachting
+        expected_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Total guests', 'Posted meals', 'Kind 0 - 3', 'Kind 4 - 11', 'Notities (gast)', 'Prijscode', 'MP Code']
         col_indices = []
         
         for expected in expected_cols:
@@ -48,7 +49,7 @@ if uploaded_file is not None:
                 if not partial.empty:
                     col_indices.append(partial.index[0])
                 else:
-                    st.error(f"Let op: Kolom '{expected}' niet gevonden!")
+                    st.error(f"Let op: Kolom '{expected}' niet gevonden in het bestand!")
                     st.stop()
 
         df = df_raw.iloc[header_row_idx + 1:, col_indices].copy()
@@ -60,8 +61,11 @@ if uploaded_file is not None:
         df = df.dropna(subset=['Kamer'])
         df['Kamer'] = df['Kamer'].astype(int)
         
+        # Alle aantallen omzetten naar berekenbare cijfers
         df['Total guests'] = pd.to_numeric(df['Total guests'], errors='coerce').fillna(0).astype(int)
         df['Posted meals'] = pd.to_numeric(df['Posted meals'], errors='coerce').fillna(0).astype(int)
+        df['Kind 0 - 3'] = pd.to_numeric(df['Kind 0 - 3'], errors='coerce').fillna(0).astype(int)
+        df['Kind 4 - 11'] = pd.to_numeric(df['Kind 4 - 11'], errors='coerce').fillna(0).astype(int)
         
         df = df[(df['Kamer'] < 6000) & (df['Kamer'] != 5810)]
         
@@ -93,9 +97,9 @@ if uploaded_file is not None:
             st.error("Er is geen data gevonden voor de geselecteerde maaltijd(en).")
             st.stop()
 
-        # Als er maar 1 maaltijd is, nemen we de MP Code mee in de pivot index
+        # MP Code gaat mee als we er maar 1 selecteren
         has_mp_code = len(selected_meals) == 1
-        pivot_index = ['Kamer', 'Gast(en)', 'Boeker', 'Total guests', 'Notities (gast)', 'Prijscode']
+        pivot_index = ['Kamer', 'Gast(en)', 'Boeker', 'Total guests', 'Kind 0 - 3', 'Kind 4 - 11', 'Notities (gast)', 'Prijscode']
         if has_mp_code:
             pivot_index.append('MP Code')
 
@@ -108,7 +112,8 @@ if uploaded_file is not None:
             fill_value=0
         ).reset_index()
         
-        df_pivot.rename(columns={'Total guests': 'Guests'}, inplace=True)
+        # Hernoem naar compacter voor op de print
+        df_pivot.rename(columns={'Total guests': 'Guests', 'Kind 0 - 3': 'Kind 0-3', 'Kind 4 - 11': 'Kind 4-11'}, inplace=True)
         
         for meal in selected_meals:
             if meal not in df_pivot.columns:
@@ -126,21 +131,22 @@ if uploaded_file is not None:
         st.markdown("---")
 
         # --- 4. DYNAMISCHE EXCEL GENEREREN ---
-        # Dynamische weergave kolommen instellen
-        display_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Guests'] + selected_meals + ['Notities (gast)', 'Prijscode']
+        # Display kolommen (Kinderen VÓÓR Notities geplaatst)
+        display_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Guests'] + selected_meals + ['Kind 0-3', 'Kind 4-11', 'Notities (gast)', 'Prijscode']
         if has_mp_code:
             display_cols.append('MP Code')
             
         # Dynamische indexen (1-based voor Excel)
         meal_indices = list(range(5, 5 + len(selected_meals)))
-        notities_idx = 5 + len(selected_meals)
+        kind1_idx = 5 + len(selected_meals)
+        kind2_idx = kind1_idx + 1
+        notities_idx = kind2_idx + 1
         prijscode_idx = notities_idx + 1
         mp_code_idx = prijscode_idx + 1 if has_mp_code else None
         
         # --- ELASTISCHE KOLOMBREEDTE BEREKENING ---
-        # Zorgt ervoor dat de tabel ALTIJD de perfecte breedte heeft van 145.77 op je A4
         base_total = 145.77
-        fixed_width = 6.20 + 30 + 7 + 30 # Kamer, Boeker, Guests, Prijscode
+        fixed_width = 6.20 + 30 + 7 + 7 + 7 + 30 # Kamer, Boeker, Guests, Kind1, Kind2, Prijscode
         meal_width = len(selected_meals) * 7
         mp_width = 7 if has_mp_code else 0
         notities_width = base_total - fixed_width - meal_width - mp_width
@@ -174,7 +180,7 @@ if uploaded_file is not None:
             ws.page_margins.header = 0.3
             ws.page_margins.footer = 0.3
 
-            # --- DYNAMISCHE TITEL EN DATUM ---
+            # --- DYNAMISCHE TITEL EN DATUM (PERFECT GECENTREERD) ---
             ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=notities_idx)
             titel_tekst = f"Maaltijdlijsten - {', '.join(selected_meals).upper()}"
             title_cell = ws.cell(row=1, column=1, value=titel_tekst)
@@ -212,7 +218,8 @@ if uploaded_file is not None:
                     else:
                         align_kwargs = {'vertical': 'center'}
                         if c_idx == 1: align_kwargs['horizontal'] = 'left'
-                        elif c_idx == 4 or c_idx in meal_indices: align_kwargs['horizontal'] = 'center'
+                        # Tel-kolommen centreren (Guests, Maaltijden, Kinderen)
+                        elif c_idx in [4, kind1_idx, kind2_idx] or c_idx in meal_indices: align_kwargs['horizontal'] = 'center'
                         elif c_idx == notities_idx: 
                             align_kwargs['horizontal'] = 'center'
                             align_kwargs['wrap_text'] = True
@@ -234,23 +241,33 @@ if uploaded_file is not None:
             ws.cell(row=max_row, column=4, value=df_subset['Guests'].sum()).font = total_font
             ws.cell(row=max_row, column=4).alignment = Alignment(horizontal='center', vertical='center')
             
+            # Totaal voor de gekozen maaltijden
             for m_idx in meal_indices:
                 meal_name = selected_meals[m_idx - 5]
                 meal_tot = df_subset[meal_name].sum()
                 ws.cell(row=max_row, column=m_idx, value=meal_tot).font = total_font
                 ws.cell(row=max_row, column=m_idx).alignment = Alignment(horizontal='center', vertical='center')
             
+            # Totalen voor de kinderen
+            ws.cell(row=max_row, column=kind1_idx, value=df_subset['Kind 0-3'].sum()).font = total_font
+            ws.cell(row=max_row, column=kind1_idx).alignment = Alignment(horizontal='center', vertical='center')
+            
+            ws.cell(row=max_row, column=kind2_idx, value=df_subset['Kind 4-11'].sum()).font = total_font
+            ws.cell(row=max_row, column=kind2_idx).alignment = Alignment(horizontal='center', vertical='center')
+            
             for c_idx in range(1, max_col + 1):
                 cell = ws.cell(row=max_row, column=c_idx)
-                if c_idx not in [1, 4] + meal_indices: cell.value = ""
+                if c_idx not in [1, 4, kind1_idx, kind2_idx] + meal_indices: cell.value = ""
                 cell.fill = total_fill
                 cell.border = thin_border
             
-            # Kolombreedtes toewijzen met de elastische 'Notities'
+            # Kolombreedtes toewijzen (Kinderen op smalle breedte van 7 gezet)
             col_widths = {1: 6.20, 2: 30, 3: 30, 4: 7}
             for m_idx in meal_indices:
                 col_widths[m_idx] = 7
                 
+            col_widths[kind1_idx] = 7
+            col_widths[kind2_idx] = 7
             col_widths[notities_idx] = notities_width
             col_widths[prijscode_idx] = 30
             if has_mp_code:
@@ -285,7 +302,8 @@ if uploaded_file is not None:
             
             ws.cell(row=start_row, column=1, value=title).font = Font(bold=True, size=12)
             
-            headers = ["Boeker", "Guests"] + selected_meals
+            # Headers voor groepen incl. Kinderen
+            headers = ["Boeker", "Guests"] + selected_meals + ["Kind 0-3", "Kind 4-11"]
             for col_num, header_title in enumerate(headers, 1):
                 cell = ws.cell(row=start_row+1, column=col_num, value=header_title)
                 cell.font = header_font
@@ -293,14 +311,14 @@ if uploaded_file is not None:
                 cell.border = thin_border
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             
-            group_summary = df_groups.groupby('Boeker', as_index=False)[['Guests'] + selected_meals].sum()
+            group_summary = df_groups.groupby('Boeker', as_index=False)[['Guests'] + selected_meals + ['Kind 0-3', 'Kind 4-11']].sum()
             
             r = start_row + 2
             for idx, grp_row in group_summary.iterrows():
                 ws.cell(row=r, column=1, value=grp_row['Boeker']).border = thin_border
                 ws.cell(row=r, column=1).fill = zebra_fill_1 if idx % 2 == 0 else zebra_fill_2
                 
-                for m_idx, col_name in enumerate(['Guests'] + selected_meals, 2):
+                for m_idx, col_name in enumerate(['Guests'] + selected_meals + ['Kind 0-3', 'Kind 4-11'], 2):
                     c = ws.cell(row=r, column=m_idx, value=grp_row[col_name])
                     c.border = thin_border
                     c.fill = zebra_fill_1 if idx % 2 == 0 else zebra_fill_2
@@ -311,7 +329,7 @@ if uploaded_file is not None:
             ws.cell(row=r, column=1).fill = total_fill
             ws.cell(row=r, column=1).border = thin_border
             
-            for m_idx, col_name in enumerate(['Guests'] + selected_meals, 2):
+            for m_idx, col_name in enumerate(['Guests'] + selected_meals + ['Kind 0-3', 'Kind 4-11'], 2):
                 c = ws.cell(row=r, column=m_idx, value=group_summary[col_name].sum())
                 c.font = total_font
                 c.fill = total_fill
@@ -326,9 +344,8 @@ if uploaded_file is not None:
         add_group_summary_to_sheet(ws_groepen, f"GROEPEN: PLAD'O ({titel_toevoeging})", df_other, next_row)
         
         ws_groepen.column_dimensions['A'].width = 40
-        ws_groepen.column_dimensions['B'].width = 12 
-        for i in range(len(selected_meals)):
-            ws_groepen.column_dimensions[get_column_letter(3 + i)].width = 12 
+        for i in range(1 + len(selected_meals) + 2):
+            ws_groepen.column_dimensions[get_column_letter(2 + i)].width = 12 
 
         output = io.BytesIO()
         wb.save(output)
