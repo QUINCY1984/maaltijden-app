@@ -36,7 +36,8 @@ if uploaded_file is not None:
         header_row_idx = mask.idxmax()
         header_row = df_raw.iloc[header_row_idx].fillna('').astype(str).str.strip()
         
-        expected_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Total guests', 'Posted meals', 'Kind 0 - 3', 'Kind 4 - 11', 'Notities (gast)', 'Prijscode', 'MP Code']
+        # 'Kind 0 - 3' is hier volledig verwijderd, we negeren deze data compleet
+        expected_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Total guests', 'Posted meals', 'Kind 4 - 11', 'Notities (gast)', 'Prijscode', 'MP Code']
         col_indices = []
         
         for expected in expected_cols:
@@ -62,7 +63,6 @@ if uploaded_file is not None:
         
         df['Total guests'] = pd.to_numeric(df['Total guests'], errors='coerce').fillna(0).astype(int)
         df['Posted meals'] = pd.to_numeric(df['Posted meals'], errors='coerce').fillna(0).astype(int)
-        df['Kind 0 - 3'] = pd.to_numeric(df['Kind 0 - 3'], errors='coerce').fillna(0).astype(int)
         df['Kind 4 - 11'] = pd.to_numeric(df['Kind 4 - 11'], errors='coerce').fillna(0).astype(int)
         
         df = df[(df['Kamer'] < 6000) & (df['Kamer'] != 5810)]
@@ -96,7 +96,7 @@ if uploaded_file is not None:
             st.stop()
 
         has_mp_code = len(selected_meals) == 1
-        pivot_index = ['Kamer', 'Gast(en)', 'Boeker', 'Total guests', 'Kind 0 - 3', 'Kind 4 - 11', 'Notities (gast)', 'Prijscode']
+        pivot_index = ['Kamer', 'Gast(en)', 'Boeker', 'Total guests', 'Kind 4 - 11', 'Notities (gast)', 'Prijscode']
         if has_mp_code:
             pivot_index.append('MP Code')
 
@@ -109,20 +109,16 @@ if uploaded_file is not None:
             fill_value=0
         ).reset_index()
         
-        df_pivot.rename(columns={'Total guests': 'Guests', 'Kind 0 - 3': 'Kind -3', 'Kind 4 - 11': 'Kind -11'}, inplace=True)
+        df_pivot.rename(columns={'Total guests': 'Guests', 'Kind 4 - 11': 'Kind -11'}, inplace=True)
         
         for meal in selected_meals:
             if meal not in df_pivot.columns:
                 df_pivot[meal] = 0
                 
-        # --- BEPAAL OF KINDER-KOLOMMEN NODIG ZIJN ---
-        show_kind_3 = df_pivot['Kind -3'].sum() > 0
+        # --- BEPAAL OF KINDER-KOLOM NODIG IS ---
         show_kind_11 = df_pivot['Kind -11'].sum() > 0
         
-        # Stel de definitieve kolommen samen op basis van wat aanwezig is
         kind_cols = []
-        if show_kind_3:
-            kind_cols.append('Kind -3')
         if show_kind_11:
             kind_cols.append('Kind -11')
             
@@ -138,24 +134,17 @@ if uploaded_file is not None:
         st.markdown("---")
 
         # --- 4. DYNAMISCHE EXCEL GENEREREN ---
-        # Display kolommen worden nu compleet dynamisch samengesteld
         display_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Guests'] + selected_meals + kind_cols + ['Notities (gast)', 'Prijscode']
         if has_mp_code:
             display_cols.append('MP Code')
             
         meal_indices = list(range(5, 5 + len(selected_meals)))
         
-        # Dynamisch bepalen waar de kolommen beginnen
         current_idx = 5 + len(selected_meals)
-        
-        kind1_idx = None
-        if show_kind_3:
-            kind1_idx = current_idx
-            current_idx += 1
             
-        kind2_idx = None
+        kind_idx = None
         if show_kind_11:
-            kind2_idx = current_idx
+            kind_idx = current_idx
             current_idx += 1
             
         notities_idx = current_idx
@@ -236,8 +225,7 @@ if uploaded_file is not None:
                         align_kwargs = {'vertical': 'center'}
                         if c_idx == 1: align_kwargs['horizontal'] = 'left'
                         elif c_idx == 4 or c_idx in meal_indices: align_kwargs['horizontal'] = 'center'
-                        elif show_kind_3 and c_idx == kind1_idx: align_kwargs['horizontal'] = 'center'
-                        elif show_kind_11 and c_idx == kind2_idx: align_kwargs['horizontal'] = 'center'
+                        elif show_kind_11 and c_idx == kind_idx: align_kwargs['horizontal'] = 'center'
                         elif c_idx == notities_idx: 
                             align_kwargs['horizontal'] = 'center'
                             align_kwargs['wrap_text'] = True
@@ -265,18 +253,12 @@ if uploaded_file is not None:
                 ws.cell(row=max_row, column=m_idx, value=meal_tot).font = total_font
                 ws.cell(row=max_row, column=m_idx).alignment = Alignment(horizontal='center', vertical='center')
             
-            if show_kind_3:
-                ws.cell(row=max_row, column=kind1_idx, value=df_subset['Kind -3'].sum()).font = total_font
-                ws.cell(row=max_row, column=kind1_idx).alignment = Alignment(horizontal='center', vertical='center')
-            
             if show_kind_11:
-                ws.cell(row=max_row, column=kind2_idx, value=df_subset['Kind -11'].sum()).font = total_font
-                ws.cell(row=max_row, column=kind2_idx).alignment = Alignment(horizontal='center', vertical='center')
+                ws.cell(row=max_row, column=kind_idx, value=df_subset['Kind -11'].sum()).font = total_font
+                ws.cell(row=max_row, column=kind_idx).alignment = Alignment(horizontal='center', vertical='center')
             
-            # Vul de lege plekken in de TOTAAL-rij
             valid_totaal_cols = [1, 4] + meal_indices
-            if show_kind_3: valid_totaal_cols.append(kind1_idx)
-            if show_kind_11: valid_totaal_cols.append(kind2_idx)
+            if show_kind_11: valid_totaal_cols.append(kind_idx)
             
             for c_idx in range(1, max_col + 1):
                 cell = ws.cell(row=max_row, column=c_idx)
@@ -286,8 +268,7 @@ if uploaded_file is not None:
             
             col_widths = {1: 6.20, 2: 30, 3: 30, 4: 7}
             for m_idx in meal_indices: col_widths[m_idx] = 7
-            if show_kind_3: col_widths[kind1_idx] = 7
-            if show_kind_11: col_widths[kind2_idx] = 7
+            if show_kind_11: col_widths[kind_idx] = 7
                 
             col_widths[notities_idx] = notities_width
             col_widths[prijscode_idx] = 30
@@ -322,7 +303,6 @@ if uploaded_file is not None:
             
             ws.cell(row=start_row, column=1, value=title).font = Font(bold=True, size=12)
             
-            # Headers voor groepen dynamisch op basis van aanwezigheid kinderen
             headers = ["Boeker", "Guests"] + selected_meals + kind_cols
             for col_num, header_title in enumerate(headers, 1):
                 cell = ws.cell(row=start_row+1, column=col_num, value=header_title)
