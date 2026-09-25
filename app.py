@@ -36,7 +36,6 @@ if uploaded_file is not None:
         header_row_idx = mask.idxmax()
         header_row = df_raw.iloc[header_row_idx].fillna('').astype(str).str.strip()
         
-        # 'Kind 0 - 3' is hier volledig verwijderd, we negeren deze data compleet
         expected_cols = ['Kamer', 'Gast(en)', 'Boeker', 'Total guests', 'Posted meals', 'Kind 4 - 11', 'Notities (gast)', 'Prijscode', 'MP Code']
         col_indices = []
         
@@ -139,7 +138,6 @@ if uploaded_file is not None:
             display_cols.append('MP Code')
             
         meal_indices = list(range(5, 5 + len(selected_meals)))
-        
         current_idx = 5 + len(selected_meals)
             
         kind_idx = None
@@ -166,6 +164,7 @@ if uploaded_file is not None:
         zebra_fill_1 = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
         zebra_fill_2 = PatternFill(start_color="E9EDF4", end_color="E9EDF4", fill_type="solid")
         pink_fill = PatternFill(start_color="FFD2D2", end_color="FFD2D2", fill_type="solid")
+        laborem_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid") # Lichtgroen voor Laborem
         allergy_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid") 
         total_font = Font(bold=True)
         total_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
@@ -211,8 +210,18 @@ if uploaded_file is not None:
                 ws.append(row)
                 excel_row = ws.max_row
                 
+                # Check of het een normale groep is OF Laborem (via de boeker of prijscode)
                 is_group = (r_idx > 1 and "groep" in str(row[prijscode_idx - 1]).lower())
-                current_fill = header_fill if r_idx == 1 else (pink_fill if is_group else (zebra_fill_1 if r_idx % 2 == 0 else zebra_fill_2))
+                is_laborem = (r_idx > 1 and ("laborem" in str(row[2]).lower() or "laborem" in str(row[prijscode_idx - 1]).lower()))
+                
+                if r_idx == 1:
+                    current_fill = header_fill
+                elif is_laborem:
+                    current_fill = laborem_fill
+                elif is_group:
+                    current_fill = pink_fill
+                else:
+                    current_fill = zebra_fill_1 if r_idx % 2 == 0 else zebra_fill_2
                 
                 for c_idx, cell in enumerate(ws[excel_row], 1):
                     cell.border = thin_border
@@ -296,7 +305,11 @@ if uploaded_file is not None:
         ws_groepen.page_margins.footer = 0.3
         
         def add_group_summary_to_sheet(ws, title, df_subset, start_row):
-            df_groups = df_subset[df_subset['Prijscode'].astype(str).str.lower().str.contains('groep')]
+            # Check nu op "groep" in de prijscode OF "laborem" in de boeker/prijscode
+            df_groups = df_subset[df_subset['Prijscode'].astype(str).str.lower().str.contains('groep') | 
+                                  df_subset['Boeker'].astype(str).str.lower().str.contains('laborem') |
+                                  df_subset['Prijscode'].astype(str).str.lower().str.contains('laborem')]
+            
             if df_groups.empty:
                 ws.cell(row=start_row, column=1, value=f"{title} - GEEN GROEPEN").font = Font(bold=True, size=12)
                 return start_row + 2
@@ -315,13 +328,16 @@ if uploaded_file is not None:
             
             r = start_row + 2
             for idx, grp_row in group_summary.iterrows():
+                is_laborem_grp = "laborem" in str(grp_row['Boeker']).lower()
+                row_fill = laborem_fill if is_laborem_grp else (zebra_fill_1 if idx % 2 == 0 else zebra_fill_2)
+                
                 ws.cell(row=r, column=1, value=grp_row['Boeker']).border = thin_border
-                ws.cell(row=r, column=1).fill = zebra_fill_1 if idx % 2 == 0 else zebra_fill_2
+                ws.cell(row=r, column=1).fill = row_fill
                 
                 for m_idx, col_name in enumerate(['Guests'] + selected_meals + kind_cols, 2):
                     c = ws.cell(row=r, column=m_idx, value=grp_row[col_name])
                     c.border = thin_border
-                    c.fill = zebra_fill_1 if idx % 2 == 0 else zebra_fill_2
+                    c.fill = row_fill
                     c.alignment = Alignment(horizontal='center', vertical='center')
                 r += 1
             
