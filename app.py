@@ -88,7 +88,6 @@ if uploaded_file is not None:
             st.warning("Kies minstens één maaltijd om verder te gaan.")
             st.stop()
             
-        # --- NIEUWE KEUZE: SAMENVOEGEN OF APART ---
         combine_lists = st.checkbox("🔄 Voeg Het buffet en plad'O samen op één lijst", value=False)
             
         df = df[df['MP_Standaard'].isin(selected_meals)]
@@ -162,12 +161,14 @@ if uploaded_file is not None:
         wb = Workbook()
         wb.remove(wb.active)
         
+        # --- KLEUREN DEFINIËREN ---
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
         zebra_fill_1 = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
         zebra_fill_2 = PatternFill(start_color="E9EDF4", end_color="E9EDF4", fill_type="solid")
         pink_fill = PatternFill(start_color="FFD2D2", end_color="FFD2D2", fill_type="solid")
-        laborem_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid") 
+        laborem_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid") # Lichtgroen
+        katholiek_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid") # Lichtoranje
         allergy_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid") 
         total_font = Font(bold=True)
         total_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
@@ -191,7 +192,6 @@ if uploaded_file is not None:
 
             ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=notities_idx)
             titel_tekst = f"Maaltijdlijsten - {', '.join(selected_meals).upper()}"
-            # Voeg eventueel de naam van het gecombineerde veld toe, of laat het neutraal
             if sheet_title == "Gecombineerde Lijst":
                 titel_tekst = f"Gecombineerd - {', '.join(selected_meals).upper()}"
             
@@ -217,13 +217,18 @@ if uploaded_file is not None:
                 ws.append(row)
                 excel_row = ws.max_row
                 
+                # Check voor specifieke groepen
                 is_group = (r_idx > 1 and "groep" in str(row[prijscode_idx - 1]).lower())
                 is_laborem = (r_idx > 1 and ("laborem" in str(row[2]).lower() or "laborem" in str(row[prijscode_idx - 1]).lower()))
+                is_katholiek = (r_idx > 1 and ("katholiek onderwijs" in str(row[2]).lower() or "katholiek onderwijs" in str(row[prijscode_idx - 1]).lower()))
                 
+                # Kleur toewijzen op basis van prioriteit
                 if r_idx == 1:
                     current_fill = header_fill
                 elif is_laborem:
                     current_fill = laborem_fill
+                elif is_katholiek:
+                    current_fill = katholiek_fill
                 elif is_group:
                     current_fill = pink_fill
                 else:
@@ -293,7 +298,6 @@ if uploaded_file is not None:
                 ws.column_dimensions[get_column_letter(col_idx)].width = w
             ws.column_dimensions['B'].hidden = True
 
-        # Beslissen of we samenvoegen of apart doen
         if combine_lists:
             format_sheet(wb.create_sheet(title="Gecombineerde Lijst"), df_pivot, "Gecombineerde Lijst", is_first_sheet=True)
         else:
@@ -315,9 +319,12 @@ if uploaded_file is not None:
         ws_groepen.page_margins.footer = 0.3
         
         def add_group_summary_to_sheet(ws, title, df_subset, start_row):
+            # Check nu op groep, laborem óf katholiek onderwijs
             df_groups = df_subset[df_subset['Prijscode'].astype(str).str.lower().str.contains('groep') | 
                                   df_subset['Boeker'].astype(str).str.lower().str.contains('laborem') |
-                                  df_subset['Prijscode'].astype(str).str.lower().str.contains('laborem')]
+                                  df_subset['Prijscode'].astype(str).str.lower().str.contains('laborem') |
+                                  df_subset['Boeker'].astype(str).str.lower().str.contains('katholiek onderwijs') |
+                                  df_subset['Prijscode'].astype(str).str.lower().str.contains('katholiek onderwijs')]
             
             if df_groups.empty:
                 ws.cell(row=start_row, column=1, value=f"{title} - GEEN GROEPEN").font = Font(bold=True, size=12)
@@ -338,7 +345,14 @@ if uploaded_file is not None:
             r = start_row + 2
             for idx, grp_row in group_summary.iterrows():
                 is_laborem_grp = "laborem" in str(grp_row['Boeker']).lower()
-                row_fill = laborem_fill if is_laborem_grp else (zebra_fill_1 if idx % 2 == 0 else zebra_fill_2)
+                is_katholiek_grp = "katholiek onderwijs" in str(grp_row['Boeker']).lower()
+                
+                if is_laborem_grp:
+                    row_fill = laborem_fill
+                elif is_katholiek_grp:
+                    row_fill = katholiek_fill
+                else:
+                    row_fill = zebra_fill_1 if idx % 2 == 0 else zebra_fill_2
                 
                 ws.cell(row=r, column=1, value=grp_row['Boeker']).border = thin_border
                 ws.cell(row=r, column=1).fill = row_fill
