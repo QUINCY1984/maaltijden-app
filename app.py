@@ -88,6 +88,9 @@ if uploaded_file is not None:
             st.warning("Kies minstens één maaltijd om verder te gaan.")
             st.stop()
             
+        # --- NIEUWE KEUZE: SAMENVOEGEN OF APART ---
+        combine_lists = st.checkbox("🔄 Voeg Het buffet en plad'O samen op één lijst", value=False)
+            
         df = df[df['MP_Standaard'].isin(selected_meals)]
         
         if df.empty:
@@ -164,7 +167,7 @@ if uploaded_file is not None:
         zebra_fill_1 = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
         zebra_fill_2 = PatternFill(start_color="E9EDF4", end_color="E9EDF4", fill_type="solid")
         pink_fill = PatternFill(start_color="FFD2D2", end_color="FFD2D2", fill_type="solid")
-        laborem_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid") # Lichtgroen voor Laborem
+        laborem_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid") 
         allergy_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid") 
         total_font = Font(bold=True)
         total_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
@@ -172,7 +175,7 @@ if uploaded_file is not None:
         
         allergy_keywords = ['allerg', 'gluten', 'lactose', 'vegan', 'vege', 'dieet', 'intoleran', 'halal', 'noten', 'pinda', 'zonder', 'vrij']
 
-        def format_sheet(ws, df_subset, is_first_sheet=False):
+        def format_sheet(ws, df_subset, sheet_title, is_first_sheet=False):
             ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
             ws.page_setup.paperSize = ws.PAPERSIZE_A4
             ws.sheet_properties.pageSetUpPr.fitToPage = True
@@ -188,6 +191,10 @@ if uploaded_file is not None:
 
             ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=notities_idx)
             titel_tekst = f"Maaltijdlijsten - {', '.join(selected_meals).upper()}"
+            # Voeg eventueel de naam van het gecombineerde veld toe, of laat het neutraal
+            if sheet_title == "Gecombineerde Lijst":
+                titel_tekst = f"Gecombineerd - {', '.join(selected_meals).upper()}"
+            
             title_cell = ws.cell(row=1, column=1, value=titel_tekst)
             title_cell.font = Font(bold=True, italic=True, underline="single", size=20)
             title_cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -210,7 +217,6 @@ if uploaded_file is not None:
                 ws.append(row)
                 excel_row = ws.max_row
                 
-                # Check of het een normale groep is OF Laborem (via de boeker of prijscode)
                 is_group = (r_idx > 1 and "groep" in str(row[prijscode_idx - 1]).lower())
                 is_laborem = (r_idx > 1 and ("laborem" in str(row[2]).lower() or "laborem" in str(row[prijscode_idx - 1]).lower()))
                 
@@ -287,8 +293,12 @@ if uploaded_file is not None:
                 ws.column_dimensions[get_column_letter(col_idx)].width = w
             ws.column_dimensions['B'].hidden = True
 
-        format_sheet(wb.create_sheet(title="Het buffet"), df_1300, is_first_sheet=True)
-        format_sheet(wb.create_sheet(title="plad'O"), df_other)
+        # Beslissen of we samenvoegen of apart doen
+        if combine_lists:
+            format_sheet(wb.create_sheet(title="Gecombineerde Lijst"), df_pivot, "Gecombineerde Lijst", is_first_sheet=True)
+        else:
+            format_sheet(wb.create_sheet(title="Het buffet"), df_1300, "Het buffet", is_first_sheet=True)
+            format_sheet(wb.create_sheet(title="plad'O"), df_other, "plad'O", is_first_sheet=False)
         
         # --- DERDE TABBLAD: GROEPEN OVERZICHT ---
         ws_groepen = wb.create_sheet(title="Groepen Overzicht")
@@ -305,7 +315,6 @@ if uploaded_file is not None:
         ws_groepen.page_margins.footer = 0.3
         
         def add_group_summary_to_sheet(ws, title, df_subset, start_row):
-            # Check nu op "groep" in de prijscode OF "laborem" in de boeker/prijscode
             df_groups = df_subset[df_subset['Prijscode'].astype(str).str.lower().str.contains('groep') | 
                                   df_subset['Boeker'].astype(str).str.lower().str.contains('laborem') |
                                   df_subset['Prijscode'].astype(str).str.lower().str.contains('laborem')]
@@ -356,8 +365,12 @@ if uploaded_file is not None:
 
         next_row = 1
         titel_toevoeging = " + ".join(selected_meals).upper()
-        next_row = add_group_summary_to_sheet(ws_groepen, f"GROEPEN: HET BUFFET ({titel_toevoeging})", df_1300, next_row)
-        add_group_summary_to_sheet(ws_groepen, f"GROEPEN: PLAD'O ({titel_toevoeging})", df_other, next_row)
+        
+        if combine_lists:
+            next_row = add_group_summary_to_sheet(ws_groepen, f"ALLE GROEPEN ({titel_toevoeging})", df_pivot, next_row)
+        else:
+            next_row = add_group_summary_to_sheet(ws_groepen, f"GROEPEN: HET BUFFET ({titel_toevoeging})", df_1300, next_row)
+            add_group_summary_to_sheet(ws_groepen, f"GROEPEN: PLAD'O ({titel_toevoeging})", df_other, next_row)
         
         ws_groepen.column_dimensions['A'].width = 40
         for i in range(1 + len(selected_meals) + len(kind_cols)):
