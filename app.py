@@ -76,7 +76,6 @@ if uploaded_file is not None:
         })
         
         # --- PENSION TYPE AFLEZEN / BEREKENEN ---
-        # We doen dit vóór het wegfilteren van de maaltijden, zodat het áltijd accuraat is!
         df_unfiltered = df.copy()
         
         def get_pension_string(mp_list, prijs_list):
@@ -84,13 +83,11 @@ if uploaded_file is not None:
             prijs_codes = [str(i).strip() for i in prijs_list if pd.notna(i) and str(i).strip() != '']
             all_codes = set([c.lower() for c in mp_codes + prijs_codes])
             
-            # Direct checken of HP/VP in de code staat
             if any(' hp ' in f" {c} " or 'hp' == c or 'half pension' in c or 'halfpension' in c for c in all_codes):
                 return 'Half Pension (HP)'
             if any(' vp ' in f" {c} " or 'vp' == c or 'vol pension' in c or 'volpension' in c for c in all_codes):
                 return 'Vol Pension (VP)'
             
-            # Geen tekstuele vermelding? Bereken op basis van de combi van maaltijden
             has_ontbijt = any('ontbijt' in c or 'breakfast' in c for c in all_codes)
             has_lunch = any('lunch' in c for c in all_codes)
             has_diner = any('diner' in c or 'dinner' in c for c in all_codes)
@@ -100,7 +97,6 @@ if uploaded_file is not None:
             elif (has_ontbijt and has_diner) or (has_ontbijt and has_lunch):
                 return 'Half Pension (HP)'
                 
-            # Mocht het slechts 1 maaltijd zijn of geen standaard HP/VP, toon dan de normale originele MP code
             if len(mp_codes) > 0:
                 return ', '.join(sorted(set(mp_codes)))
             return ''
@@ -201,8 +197,9 @@ if uploaded_file is not None:
         zebra_fill_1 = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
         zebra_fill_2 = PatternFill(start_color="E9EDF4", end_color="E9EDF4", fill_type="solid")
         pink_fill = PatternFill(start_color="FFD2D2", end_color="FFD2D2", fill_type="solid")
-        laborem_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid") # Lichtgroen
+        laborem_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")   # Lichtgroen
         katholiek_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid") # Lichtoranje
+        darts_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")     # Geel voor Darts
         allergy_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid") 
         total_font = Font(bold=True)
         total_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
@@ -251,9 +248,13 @@ if uploaded_file is not None:
                 ws.append(row)
                 excel_row = ws.max_row
                 
-                is_group = (r_idx > 1 and "groep" in str(row[prijscode_idx - 1]).lower())
-                is_laborem = (r_idx > 1 and ("laborem" in str(row[2]).lower() or "laborem" in str(row[prijscode_idx - 1]).lower()))
-                is_katholiek = (r_idx > 1 and ("katholiek onderwijs" in str(row[2]).lower() or "katholiek onderwijs" in str(row[prijscode_idx - 1]).lower()))
+                prijscode_val = str(row[prijscode_idx - 1]).lower()
+                boeker_val = str(row[2]).lower()
+                
+                is_group = (r_idx > 1 and "groep" in prijscode_val)
+                is_laborem = (r_idx > 1 and ("laborem" in boeker_val or "laborem" in prijscode_val))
+                is_katholiek = (r_idx > 1 and ("katholiek onderwijs" in boeker_val or "katholiek onderwijs" in prijscode_val))
+                is_darts = (r_idx > 1 and "darts" in prijscode_val)
                 
                 if r_idx == 1:
                     current_fill = header_fill
@@ -261,6 +262,8 @@ if uploaded_file is not None:
                     current_fill = laborem_fill
                 elif is_katholiek:
                     current_fill = katholiek_fill
+                elif is_darts:
+                    current_fill = darts_fill
                 elif is_group:
                     current_fill = pink_fill
                 else:
@@ -355,7 +358,8 @@ if uploaded_file is not None:
                                   df_subset['Boeker'].astype(str).str.lower().str.contains('laborem') |
                                   df_subset['Prijscode'].astype(str).str.lower().str.contains('laborem') |
                                   df_subset['Boeker'].astype(str).str.lower().str.contains('katholiek onderwijs') |
-                                  df_subset['Prijscode'].astype(str).str.lower().str.contains('katholiek onderwijs')]
+                                  df_subset['Prijscode'].astype(str).str.lower().str.contains('katholiek onderwijs') |
+                                  df_subset['Prijscode'].astype(str).str.lower().str.contains('darts')]
             
             if df_groups.empty:
                 ws.cell(row=start_row, column=1, value=f"{title} - GEEN GROEPEN").font = Font(bold=True, size=12)
@@ -363,7 +367,11 @@ if uploaded_file is not None:
             
             ws.cell(row=start_row, column=1, value=title).font = Font(bold=True, size=12)
             
-            # Voeg de Pension kolom toe in de headers
+            # Boekers bijhouden per speciaal type zodat de rij in Groepen Overzicht dezelfde kleur krijgt
+            laborem_boekers = set(df_groups[df_groups['Prijscode'].astype(str).str.lower().str.contains('laborem')]['Boeker'].astype(str))
+            katholiek_boekers = set(df_groups[df_groups['Prijscode'].astype(str).str.lower().str.contains('katholiek onderwijs')]['Boeker'].astype(str))
+            darts_boekers = set(df_groups[df_groups['Prijscode'].astype(str).str.lower().str.contains('darts')]['Boeker'].astype(str))
+            
             headers = ["Boeker", "Pension", "Guests"] + selected_meals + kind_cols
             for col_num, header_title in enumerate(headers, 1):
                 cell = ws.cell(row=start_row+1, column=col_num, value=header_title)
@@ -372,35 +380,34 @@ if uploaded_file is not None:
                 cell.border = thin_border
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             
-            # Groepeer de geselecteerde data op Boeker
             group_summary = df_groups.groupby('Boeker', as_index=False)[['Guests'] + selected_meals + kind_cols].sum()
             
-            # Koppel hier het berekende Pension-type (HP/VP) aan de juiste boeker
             group_summary = pd.merge(group_summary, boeker_pension, on='Boeker', how='left')
             group_summary['Pension'] = group_summary['Pension'].fillna('')
             
             r = start_row + 2
             for idx, grp_row in group_summary.iterrows():
-                is_laborem_grp = "laborem" in str(grp_row['Boeker']).lower()
-                is_katholiek_grp = "katholiek onderwijs" in str(grp_row['Boeker']).lower()
+                boeker_naam = str(grp_row['Boeker'])
+                is_laborem_grp = "laborem" in boeker_naam.lower() or boeker_naam in laborem_boekers
+                is_katholiek_grp = "katholiek onderwijs" in boeker_naam.lower() or boeker_naam in katholiek_boekers
+                is_darts_grp = "darts" in boeker_naam.lower() or boeker_naam in darts_boekers
                 
                 if is_laborem_grp:
                     row_fill = laborem_fill
                 elif is_katholiek_grp:
                     row_fill = katholiek_fill
+                elif is_darts_grp:
+                    row_fill = darts_fill
                 else:
                     row_fill = zebra_fill_1 if idx % 2 == 0 else zebra_fill_2
                 
-                # Schrijf Boeker
                 ws.cell(row=r, column=1, value=grp_row['Boeker']).border = thin_border
                 ws.cell(row=r, column=1).fill = row_fill
                 
-                # Schrijf Pension Type (HP/VP)
                 ws.cell(row=r, column=2, value=grp_row['Pension']).border = thin_border
                 ws.cell(row=r, column=2).fill = row_fill
                 ws.cell(row=r, column=2).alignment = Alignment(horizontal='center', vertical='center')
                 
-                # Schrijf de maaltijd en gasten-aantallen
                 for m_idx, col_name in enumerate(['Guests'] + selected_meals + kind_cols, 3):
                     c = ws.cell(row=r, column=m_idx, value=grp_row[col_name])
                     c.border = thin_border
@@ -408,12 +415,10 @@ if uploaded_file is not None:
                     c.alignment = Alignment(horizontal='center', vertical='center')
                 r += 1
             
-            # Totaalrij van de groepentabel
             ws.cell(row=r, column=1, value="TOTAAL").font = total_font
             ws.cell(row=r, column=1).fill = total_fill
             ws.cell(row=r, column=1).border = thin_border
             
-            # Leeg vakje voor Pension Totaal
             ws.cell(row=r, column=2, value="").fill = total_fill
             ws.cell(row=r, column=2).border = thin_border
             
@@ -435,9 +440,8 @@ if uploaded_file is not None:
             next_row = add_group_summary_to_sheet(ws_groepen, f"GROEPEN: HET BUFFET ({titel_toevoeging})", df_1300, next_row)
             add_group_summary_to_sheet(ws_groepen, f"GROEPEN: PLAD'O ({titel_toevoeging})", df_other, next_row)
         
-        # Aangepaste kolombreedtes voor het groepenoverzicht
-        ws_groepen.column_dimensions['A'].width = 35 # Boeker
-        ws_groepen.column_dimensions['B'].width = 20 # Pension type
+        ws_groepen.column_dimensions['A'].width = 35
+        ws_groepen.column_dimensions['B'].width = 20
         for i in range(1 + len(selected_meals) + len(kind_cols)):
             ws_groepen.column_dimensions[get_column_letter(3 + i)].width = 12 
 
